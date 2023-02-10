@@ -1,0 +1,145 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+Description: |
+  document-mgmt-app
+  Sample SAM Template for document-mgmt-app
+Globals:
+  Function:
+    Timeout: 3
+    
+Parameters:
+  Bucket:
+    Type: String
+    Description: The name of the S3 Bucket
+  OpenSearchEndpoint:
+    Type: String
+    Description: The name of the opensearch endpoint which will be used for publishing and searching the metadata or content
+  CognitoDomain:
+    Type: String
+    Description: The name of the cognito domain endpoint which will be used for authentication and fetching tokens
+    
+Resources:
+  DocMgmtBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref Bucket
+      VersioningConfiguration:
+        Status: Enabled
+
+  CognitoUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: DocMgmt-UserPool
+      UsernameAttributes: 
+        - email
+      AutoVerifiedAttributes:
+        - email
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 6
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+          RequireUppercase: true
+      
+  UserPoolTokenClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - USER_PASSWORD_AUTH
+        
+  CognitoUserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Ref CognitoDomain
+      UserPoolId: !Ref CognitoUserPool
+        
+  FrontDoorAPI:
+    DependsOn: CognitoUserPool
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: prod
+      BinaryMediaTypes:
+        - "*/*"
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn: !GetAtt CognitoUserPool.Arn
+              
+  UploadDocumentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: upload-document-fn
+      CodeUri: document-solution-app/
+      Handler: upload-document.lambda_handler
+      Runtime: python3.7
+      Policies:
+        - arn:aws:iam::aws:policy/AWSLambdaExecute
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+      Events:
+        Root:
+          Type: Api
+          Properties:
+            RestApiId: !Ref FrontDoorAPI
+            Path: /upload
+            Method: POST        
+
+  GeneratePreSignURLFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: generate-presigned-url-fn
+      CodeUri: document-solution-app/
+      Handler: generate-pre-signed-url.lambda_handler
+      Runtime: python3.7
+      Policies:
+        - arn:aws:iam::aws:policy/AWSLambdaExecute
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+      Events:
+        Root:
+          Type: Api
+          Properties:
+            RestApiId: !Ref FrontDoorAPI
+            Path: /upload
+            Method: GET
+
+  DeleteDocumentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: delete-document-fn
+      CodeUri: document-solution-app/
+      Handler: delete-document.lambda_handler
+      Runtime: python3.7
+      Policies:
+        - arn:aws:iam::aws:policy/AWSLambdaExecute
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+      Events:
+        Root:
+          Type: Api
+          Properties:
+            RestApiId: !Ref FrontDoorAPI
+            Path: /upload
+            Method: DELETE
+            
+  S3OpenSearchFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: s3-opensearch-fn
+      CodeUri: document-solution-app/
+      Handler: s3-opensearch.lambda_handler
+      Runtime: python3.7
+      Environment:
+        Variables:
+          OPENSEARCH_ENDPOINT: !Ref OpenSearchEndpoint
+      Policies:
+        - arn:aws:iam::aws:policy/AWSLambdaExecute
+        - arn:aws:iam::aws:policy/AmazonAPIGatewayInvokeFullAccess
+      Events:
+        ObjectUpload:
+          Type: S3
+          Properties:
+            Bucket: !Ref DocMgmtBucket
+            Events: s3:ObjectCreated:*
