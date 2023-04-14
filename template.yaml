@@ -6,7 +6,7 @@ Description: |
   Sample SAM Template for document-mgmt-app
 Globals:
   Function:
-    Timeout: 3
+    Timeout: 10
     
 Parameters:
   Bucket:
@@ -48,8 +48,17 @@ Resources:
     Properties:
       UserPoolId: !Ref CognitoUserPool
       GenerateSecret: false
-      ExplicitAuthFlows:
-        - USER_PASSWORD_AUTH
+      CallbackURLs:
+        - https://oauth.pstmn.io/v1/callback
+      SupportedIdentityProviders:
+        - COGNITO
+      AllowedOAuthFlows:
+        - code   
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthScopes:
+        - phone
+        - email
+        - openid
         
   CognitoUserPoolDomain:
     Type: AWS::Cognito::UserPoolDomain
