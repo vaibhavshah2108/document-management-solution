@@ -12,10 +12,6 @@ Parameters:
   Bucket:
     Type: String
     Description: The name of the S3 Bucket
-  OpenSearchEndpoint:
-    Type: String
-    Description: The name of the opensearch endpoint which will be used for publishing
-      and searching the metadata or content
   CognitoDomain:
     Type: String
     Description: The name of the cognito domain endpoint which will be used for authentication
@@ -67,6 +63,42 @@ Resources:
         Ref: CognitoDomain
       UserPoolId:
         Ref: CognitoUserPool
+  IAMUSer:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: aossadmin
+  DataAccessPolicy:
+    Type: AWS::OpenSearchServerless::AccessPolicy
+    Properties:
+      Name: doc-mgmt-access-policy
+      Type: data
+      Description: Access policy for doc management collection
+      Policy:
+        Fn::Sub: '[{"Description":"Access for cfn user","Rules":[{"ResourceType":"index","Resource":["index/*/*"],"Permission":["aoss:*"]},
+          {"ResourceType":"collection","Resource":["collection/*"],"Permission":["aoss:*"]}],
+          "Principal":["arn:aws:iam::${AWS::AccountId}:user/aossadmin"]}]'
+  NetworkPolicy:
+    Type: AWS::OpenSearchServerless::SecurityPolicy
+    Properties:
+      Name: doc-mgmt-network-policy
+      Type: network
+      Description: Network policy for doc management collection
+      Policy: '[{"Rules":[{"ResourceType":"collection","Resource":["collection/*"]},
+        {"ResourceType":"dashboard","Resource":["collection/*"]}],"AllowFromPublic":true}]'
+  EncryptionPolicy:
+    Type: AWS::OpenSearchServerless::SecurityPolicy
+    Properties:
+      Name: doc-mgmt-security-policy
+      Type: encryption
+      Description: Encryption policy for doc management collection
+      Policy: '{"Rules":[{"ResourceType":"collection","Resource":["collection/*"]}],"AWSOwnedKey":true}'
+  Collection:
+    Type: AWS::OpenSearchServerless::Collection
+    Properties:
+      Name: doc-mgmt-bofa
+      Type: SEARCH
+      Description: Collection to holds search data
+    DependsOn: EncryptionPolicy
   FrontDoorAPI:
     DependsOn: CognitoUserPool
     Type: AWS::Serverless::Api
@@ -144,6 +176,7 @@ Resources:
       SamResourceId: DeleteDocumentFunction
   S3OpenSearchFunction:
     Type: AWS::Serverless::Function
+    DependsOn: Collection
     Properties:
       FunctionName: s3-opensearch-fn
       CodeUri: S3OpenSearchFunction
@@ -152,7 +185,9 @@ Resources:
       Environment:
         Variables:
           OPENSEARCH_ENDPOINT:
-            Ref: OpenSearchEndpoint
+            Fn::GetAtt:
+            - Collection
+            - CollectionEndpoint
       Policies:
       - arn:aws:iam::aws:policy/AWSLambdaExecute
       - arn:aws:iam::aws:policy/AmazonAPIGatewayInvokeFullAccess
